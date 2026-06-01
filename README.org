@@ -1,0 +1,4 @@
+* Hanat Chess Engine
+Hanat is a chess engine developed to maximize chess performance on as few games as possible. The challenge is as follows:
+
+You are given 3000 GM-sourced games, each position given a stockfish evaluation. Additionally, you are allowed to leverage Stockfishs' evaluation engine separately 3000 times. Using only these constraints, train a model to achieve 2300 Elo, without using self play.
