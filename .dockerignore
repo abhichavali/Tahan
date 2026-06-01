@@ -1,0 +1,12 @@
+.git
+.gitignore
+**/__pycache__/
+*.pyc
+*.so
+build/
+*.egg-info/
+.eggs/
+checkpoints/
+*.zip
+.claude/
+.DS_Store

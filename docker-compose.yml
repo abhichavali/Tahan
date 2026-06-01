@@ -1,0 +1,43 @@
+# Two build targets for Hanat. Pick one:
+#
+#   CPU:   docker compose build hanat        &&  docker compose run --rm hanat
+#   GPU:   docker compose build hanat-gpu    &&  docker compose run --rm hanat-gpu
+#
+# Both mount ./data (datasets) and ./checkpoints (training outputs) so they
+# persist on the host. Source code is baked into the image — rebuild after code
+# changes for a reproducible training environment.
+
+services:
+  hanat:
+    build:
+      context: .
+      args:
+        BASE_IMAGE: ubuntu:22.04
+        CUDA_TAG: cpu
+    image: hanat:cpu
+    volumes:
+      - ./data:/app/data
+      - ./checkpoints:/app/checkpoints
+    stdin_open: true
+    tty: true
+
+  hanat-gpu:
+    build:
+      context: .
+      args:
+        BASE_IMAGE: nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+        CUDA_TAG: cu124
+    image: hanat:gpu
+    volumes:
+      - ./data:/app/data
+      - ./checkpoints:/app/checkpoints
+    stdin_open: true
+    tty: true
+    # Requires the NVIDIA Container Toolkit on the host.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
