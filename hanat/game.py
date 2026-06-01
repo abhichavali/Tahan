@@ -9,7 +9,10 @@ insufficient material).
 from __future__ import annotations
 
 from collections import Counter
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
+
+if TYPE_CHECKING:
+    from .engine.base import BaseEngine
 
 from .board import BLACK, WHITE, Board, START_FEN
 from .move import Move
@@ -32,12 +35,14 @@ class Game:
         False
     """
 
-    def __init__(self, fen: str = START_FEN):
+    def __init__(self, fen: str = START_FEN, engine: Optional[BaseEngine] = None):
         self.board = Board(fen)
         self.history: List[dict] = []
         self.headers: dict = {}
         self._positions: Counter = Counter()
         self._record_position()
+        from .engine.random import RandomEngine
+        self.engine = engine if engine is not None else RandomEngine()
 
     @classmethod
     def from_fen(cls, fen: str) -> "Game":
@@ -188,3 +193,7 @@ class Game:
 
     def __str__(self) -> str:
         return self.board_str()
+
+    def predict_next_move(self) -> Optional[Move]:
+        """Predict the next best move for the active side."""
+        return self.engine.predict_next_move(self)

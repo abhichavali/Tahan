@@ -27,9 +27,9 @@ import subprocess
 from dataclasses import dataclass
 from typing import Optional, Union
 
-from .board import WHITE, Board
-from .game import Game
-from .move import Move
+from ..board import WHITE, Board
+from ..game import Game
+from ..move import Move
 
 PositionLike = Union[Board, Game, str]
 
@@ -67,7 +67,7 @@ class Evaluation:
 
         Centipawn scores are returned as-is; mates are mapped to large signed
         values so that "White mates" always outranks any centipawn advantage and
-        a faster mate outranks a slower one. Useful as a training label.
+        a slower one outranks a faster one. Useful as a training label.
         """
         if self.mate is not None:
             sign = 1 if self.mate > 0 else -1

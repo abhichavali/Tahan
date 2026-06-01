@@ -24,7 +24,15 @@ from .dataset import (
     load_games,
     load_pgns,
 )
-from .engine import Engine, Evaluation, evaluate, find_stockfish
+from .engine import (
+    Engine,
+    Evaluation,
+    evaluate,
+    find_stockfish,
+    BaseEngine,
+    RandomEngine,
+    MaterialEngine,
+)
 from .game import DRAW, BLACK_WINS, WHITE_WINS, Game
 from .move import Move
 from .pgn import parse_pgn
@@ -45,6 +53,9 @@ __all__ = [
     "Evaluation",
     "evaluate",
     "find_stockfish",
+    "BaseEngine",
+    "RandomEngine",
+    "MaterialEngine",
     "parse_pgn",
     "iter_pgns",
     "iter_games",
