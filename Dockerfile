@@ -40,7 +40,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential g++ \
         stockfish \
         git ca-certificates \
+        cmake \
+        qt6-base-dev \
+        qt6-svg-dev \
+        qt6-5compat-dev \
+        qt6-base-dev-tools \
     && rm -rf /var/lib/apt/lists/*
+
+# Build and install Ordo
+RUN git clone https://github.com/michiguel/Ordo.git /tmp/ordo \
+    && cd /tmp/ordo/src \
+    && make \
+    && cp ordo /usr/local/bin/ \
+    && rm -rf /tmp/ordo
+
+# Build and install cutechess-cli
+RUN git clone https://github.com/cutechess/cutechess.git /tmp/cutechess \
+    && cd /tmp/cutechess \
+    && cmake -S . -B build \
+    && cmake --build build --target cutechess-cli \
+    && cp build/projects/cli/cutechess-cli /usr/local/bin/ \
+    && rm -rf /tmp/cutechess
 
 # uv: a single static binary, copied from the official image.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
