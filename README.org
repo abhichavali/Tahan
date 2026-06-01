@@ -1,4 +1,98 @@
-* Hanat Chess Engine
-Hanat is a chess engine developed to maximize chess performance on as few games as possible. The challenge is as follows:
+* Hanat (ハナツ)
 
-You are given 3000 GM-sourced games, each position given a stockfish evaluation. Additionally, you are allowed to leverage Stockfishs' evaluation engine separately 3000 times. Using only these constraints, train a model to achieve 2300 Elo, without using self play.
+Hanat is a highly constrained, data-efficient chess engine. The project explores the limits of sample efficiency in reinforcement learning by training a robust policy and value head under a strict joint budget of grandmaster (GM) games and limited oracle evaluations.
+
+Instead of separating data sources by architecture, the engine is given complete freedom to leverage the total data pool to maximize Elo under extreme data scarcity.
+
+** The Core Challenge
+
+Modern chess engines and AlphaZero-like architectures typically rely on millions of games and massive compute budgets. Hanat operates under a strict data-cap constraint to evaluate maximum performance per data point:
+
+- *Human Baseline:* Exactly *5,000* GM-sourced games.
+- *Oracle Budget:* Maximum *10,000* calls to the Stockfish evaluation engine.
+- *Search Architecture:* Standardized Monte Carlo Tree Search (MCTS).
+- *Goal:* Maximize engine Elo by training Policy and Value heads within these boundaries, allocating the available data dynamically.
+
+-----
+
+** Architecture & Data Strategy
+
+Hanat decouples the neural network heads from the search architecture to ensure clean optimization:
+
+#+begin_example
++-----------------------------------+
+|      MCTS Search Architecture     |
++-----------------+-----------------+
+|
++----------------+----------------+
+|                                 |
+v                                 v
++--------------------+             +-------------------+
+|    Policy Head     |             |    Value Head     |
+|  (Move Selection)  |             | (State Evaluation)|
++--------------------+             +-------------------+
+#+end_example
+
+Both the *Policy Head* and *Value Head* have open access to the total constrained data pool. The core machine learning challenge of this project is determining the optimal data allocation strategy:
+
+- How to balance the 5,000 GM games between policy imitation and value target bootstrapping.
+- How to strategically spend the 10,000 Stockfish oracle calls to resolve high-entropy states for either head.
+
+-----
+
+** Getting Started
+
+*** Installation & Requirements
+
+Hanat requires Python 3.10 or newer.
+
+To set up the project locally:
+
+1. Clone the repository and navigate to the project root.
+2. Install the package in editable mode along with its dependencies:
+   #+begin_src bash
+   pip install -e .
+   #+end_src
+   *(Note: The core rules engine is dependency-free, but training requires packages listed in =pyproject.toml=, such as =numpy=, =tqdm=, and =torch_geometric=. You should install PyTorch following the official instructions for your platform.)*
+
+*** Compiling the Native Backend (Optional but Recommended)
+
+For a ~100x speedup in move generation (critical for bulk dataset loading or search), compile the native C++ backend (requires a C++17 compiler):
+
+#+begin_src bash
+python3 setup.py build_ext --inplace
+#+end_src
+
+The engine automatically detects and falls back to the pure-Python implementation if the compiled extension is not found.
+
+*** Running Tests
+
+To verify the installation and run the move generation verification suite:
+
+#+begin_src bash
+python3 -m unittest discover tests
+#+end_src
+
+*** Running Training
+
+To train the GNN outcome model on a PGN dataset:
+
+#+begin_src bash
+python3 train.py --data data/twic1646.pgn --max-games 3000 --epochs 5
+#+end_src
+
+
+*** Using Docker
+
+A complete environment containing Python, C++ toolchain, Stockfish, PyTorch, and PyTorch Geometric can be run via Docker Compose:
+
+#+begin_src bash
+# Build and run the CPU image
+docker compose build hanat
+docker compose run --rm hanat
+
+# Build and run the GPU image (requires NVIDIA Container Toolkit)
+docker compose build hanat-gpu
+docker compose run --rm hanat-gpu
+#+end_src
+
