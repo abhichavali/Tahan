@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.so
+build/
+*.egg-info/
+checkpoints/
+
+# Local agent settings
+.claude/
+
+# Datasets are provided via the ./data volume mount, not tracked in git
+data/
+*.zip

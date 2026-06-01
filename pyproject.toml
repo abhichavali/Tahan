@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hanat"
+version = "0.1.0"
+description = "Chess rules engine (pure-Python + optional native C++ backend) with PGN/dataset loaders and a Stockfish bridge, for training a chess model from GM games."
+readme = "USAGE.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "tqdm>=4.65",
+    "torch_geometric>=2.5",
+]
+
+# torch is intentionally NOT listed here: it is installed from the PyTorch wheel
+# index (CPU vs CUDA build) in the Dockerfile, so pinning it as a normal PyPI
+# dependency would pull the wrong build.
+
+[tool.setuptools]
+packages = ["hanat"]
