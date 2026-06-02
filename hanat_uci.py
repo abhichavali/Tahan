@@ -3,7 +3,7 @@
 
 import sys
 import argparse
-from hanat import Game, RandomEngine, MaterialEngine
+from hanat import Game, MaterialEngine
 
 
 def main():
@@ -11,16 +11,13 @@ def main():
     parser.add_argument(
         "--engine",
         type=str,
-        default="random",
-        choices=["random", "material"],
-        help="The engine policy to use ('random' or 'material')",
+        default="material",
+        choices=["material"],
+        help="The engine policy to use ('material')",
     )
     args, unknown = parser.parse_known_args()
 
-    if args.engine == "material":
-        engine = MaterialEngine()
-    else:
-        engine = RandomEngine()
+    engine = MaterialEngine()
 
     game = Game(engine=engine)
 

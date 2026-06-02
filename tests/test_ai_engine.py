@@ -1,5 +1,5 @@
 import unittest
-from hanat import Game, BaseEngine, Move, RandomEngine
+from hanat import Game, BaseEngine, Move
 
 
 class CustomAlwaysFirstEngine(BaseEngine):
@@ -11,12 +11,11 @@ class CustomAlwaysFirstEngine(BaseEngine):
 
 
 class TestAIEngine(unittest.TestCase):
-    def test_default_engine_is_random(self):
+    def test_default_engine_is_none(self):
         game = Game()
-        self.assertIsInstance(game.engine, RandomEngine)
-        move = game.predict_next_move()
-        self.assertIsInstance(move, Move)
-        self.assertIn(move, game.legal_moves())
+        self.assertIsNone(game.engine)
+        with self.assertRaises(ValueError):
+            game.predict_next_move()
 
     def test_custom_engine(self):
         engine = CustomAlwaysFirstEngine()

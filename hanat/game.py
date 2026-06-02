@@ -41,8 +41,7 @@ class Game:
         self.headers: dict = {}
         self._positions: Counter = Counter()
         self._record_position()
-        from .engine.random import RandomEngine
-        self.engine = engine if engine is not None else RandomEngine()
+        self.engine = engine
 
     @classmethod
     def from_fen(cls, fen: str) -> "Game":
@@ -196,4 +195,6 @@ class Game:
 
     def predict_next_move(self) -> Optional[Move]:
         """Predict the next best move for the active side."""
+        if self.engine is None:
+            raise ValueError("No engine has been set for this game.")
         return self.engine.predict_next_move(self)

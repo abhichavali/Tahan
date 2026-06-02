@@ -30,7 +30,6 @@ from .engine import (
     evaluate,
     find_stockfish,
     BaseEngine,
-    RandomEngine,
     MaterialEngine,
     MCTSEngine,
 )
@@ -55,7 +54,6 @@ __all__ = [
     "evaluate",
     "find_stockfish",
     "BaseEngine",
-    "RandomEngine",
     "MaterialEngine",
     "MCTSEngine",
     "parse_pgn",
