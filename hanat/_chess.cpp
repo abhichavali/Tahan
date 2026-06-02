@@ -13,6 +13,7 @@
 
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -657,6 +658,333 @@ static PyObject* Board_perft(PyObject* self, PyObject* args) {
     return PyLong_FromLong(n);
 }
 
+// ====================================================================== //
+// Monte Carlo Tree Search (MCTS) Implementation
+// ====================================================================== //
+
+// Represents a node in the MCTS search tree.
+struct MCTSNode {
+    Move move;                  // Move that led to this node (from parent)
+    char turn;                  // Side to move at this node ('w' or 'b')
+    double w = 0.0;             // Cumulative reward/value backpropagated to this node
+    int n = 0;                  // Visit count
+    double p = 0.0;             // Prior probability of this node (from policy head)
+    MCTSNode* parent = nullptr;
+    std::vector<MCTSNode*> children;
+    bool is_expanded = false;
+    bool is_terminal = false;
+    double reward = 0.0;        // Terminal value if is_terminal is true
+
+    MCTSNode(Move m, MCTSNode* p_node, double prob, char t)
+        : move(m), turn(t), p(prob), parent(p_node) {}
+
+    ~MCTSNode() {
+        for (auto* child : children) {
+            delete child;
+        }
+    }
+};
+
+// Step 1: Selection Helper - Chooses the best child using PUCT formula (AlphaZero style)
+MCTSNode* select_child(MCTSNode* parent, double c_puct) {
+    MCTSNode* best = nullptr;
+    double best_score = -1e9;
+    for (auto* child : parent->children) {
+        double score = 0.0;
+        double q_val = 0.0;
+        if (child->n > 0) {
+            // Mean value from the current node's perspective is negative of opponent's Q
+            q_val = -(child->w / child->n);
+        }
+        // PUCT exploration term
+        double u_val = c_puct * child->p * std::sqrt(parent->n) / (1.0 + child->n);
+        score = q_val + u_val;
+        if (score > best_score) {
+            best_score = score;
+            best = child;
+        }
+    }
+    return best;
+}
+
+// Helper to determine if a board state is terminal and compute the reward
+bool is_terminal_state(const Board& b, double& out_result) {
+    if (b.is_checkmate()) {
+        // If it is White's turn, White is checkmated (Black wins, -1.0)
+        // If it is Black's turn, Black is checkmated (White wins, +1.0)
+        out_result = (b.turn == 'w') ? -1.0 : 1.0;
+        return true;
+    }
+    if (b.is_stalemate() || b.is_insufficient() || b.halfmove >= 100) {
+        out_result = 0.0; // Draw
+        return true;
+    }
+    return false;
+}
+
+// Helper to retrieve UCI representation of a move
+std::string uci_name(const Move& m) {
+    std::string s = sq_name(m.from) + sq_name(m.to);
+    if (m.promo) s += m.promo;
+    return s;
+}
+
+// Helper to retrieve prior probability for a move from the Python policy head
+double get_prob(PyObject* policy_obj, const Move& m, int idx, int total_moves) {
+    if (!policy_obj || policy_obj == Py_None) {
+        return 1.0 / total_moves;
+    }
+    if (PyDict_Check(policy_obj)) {
+        // Try looking up by UCI string key first
+        std::string uci = uci_name(m);
+        PyObject* val = PyDict_GetItemString(policy_obj, uci.c_str());
+        if (val) {
+            double prob = PyFloat_AsDouble(val);
+            if (!PyErr_Occurred()) return prob;
+            PyErr_Clear();
+        }
+        // Try lookup by (from, to, None) tuple key first
+        PyObject* promo_py = Py_None;
+        if (m.promo) {
+            char buf[2] = {m.promo, 0};
+            promo_py = PyUnicode_FromString(buf);
+        } else {
+            Py_INCREF(Py_None);
+        }
+        PyObject* tup_none = PyTuple_Pack(3, PyLong_FromLong(m.from), PyLong_FromLong(m.to), promo_py);
+        Py_DECREF(promo_py);
+        if (tup_none) {
+            val = PyDict_GetItem(policy_obj, tup_none);
+            Py_DECREF(tup_none);
+            if (val) {
+                double prob = PyFloat_AsDouble(val);
+                if (!PyErr_Occurred()) return prob;
+                PyErr_Clear();
+            }
+        }
+        // Fall back to looking up by (from, to, "") tuple key
+        PyObject* tup_empty = Py_BuildValue("iis", m.from, m.to, m.promo ? std::string(1, m.promo).c_str() : "");
+        if (tup_empty) {
+            val = PyDict_GetItem(policy_obj, tup_empty);
+            Py_DECREF(tup_empty);
+            if (val) {
+                double prob = PyFloat_AsDouble(val);
+                if (!PyErr_Occurred()) return prob;
+                PyErr_Clear();
+            }
+        }
+        PyErr_Clear();
+        return 0.0;
+    }
+    if (PySequence_Check(policy_obj)) {
+        // If it's a sequence/list of policy values matching the index of legal moves
+        Py_ssize_t len = PySequence_Size(policy_obj);
+        if (idx >= 0 && idx < len) {
+            PyObject* item = PySequence_GetItem(policy_obj, idx);
+            if (item) {
+                double prob = PyFloat_AsDouble(item);
+                Py_DECREF(item);
+                if (!PyErr_Occurred()) return prob;
+                PyErr_Clear();
+            }
+        }
+    }
+    return 1.0 / total_moves;
+}
+
+// The main C++ bridge for MCTS search
+static PyObject* Board_mcts_search(PyObject* self, PyObject* args) {
+    PyObject* policy_head = Py_None;
+    PyObject* value_head = Py_None;
+    int num_simulations = 100;
+    double c_puct = 1.414;
+
+    if (!PyArg_ParseTuple(args, "|OOid", &policy_head, &value_head, &num_simulations, &c_puct)) {
+        return NULL;
+    }
+
+    if (!value_head || value_head == Py_None) {
+        PyErr_SetString(PyExc_ValueError, "value_head is required for PUCT MCTS evaluation");
+        return NULL;
+    }
+
+    const Board& start_board = B(self);
+
+    // Step 0: Initialize root node
+    MCTSNode* root = new MCTSNode({0, 0, 0}, nullptr, 1.0, start_board.turn);
+
+    // Expand root node immediately to get initial legal moves
+    std::vector<Move> root_legal;
+    start_board.legal_moves(root_legal);
+    if (root_legal.empty()) {
+        delete root;
+        Py_RETURN_NONE; // Game is already over in starting position
+    }
+
+    PyObject* root_policy_obj = nullptr;
+    if (policy_head && policy_head != Py_None) {
+        PyObject* py_board = make_board();
+        if (py_board) {
+            B(py_board) = start_board;
+            root_policy_obj = PyObject_CallFunction(policy_head, "O", py_board);
+            Py_DECREF(py_board);
+            if (!root_policy_obj && PyErr_Occurred()) {
+                delete root;
+                return NULL;
+            }
+        }
+    }
+
+    root->children.reserve(root_legal.size());
+    for (size_t i = 0; i < root_legal.size(); i++) {
+        double prob = get_prob(root_policy_obj, root_legal[i], i, root_legal.size());
+        Board temp = start_board;
+        temp.apply(root_legal[i]);
+        root->children.push_back(new MCTSNode(root_legal[i], root, prob, temp.turn));
+    }
+    if (root_policy_obj) {
+        Py_DECREF(root_policy_obj);
+    }
+    root->is_expanded = true;
+
+    // Run the specified number of search simulations
+    for (int sim = 0; sim < num_simulations; sim++) {
+        MCTSNode* node = root;
+        Board board = start_board;
+
+        // --- Step 1: Selection ---
+        // Traverse down the tree using PUCT selection
+        // until we reach a leaf node (not yet expanded or terminal)
+        while (node->is_expanded && !node->is_terminal) {
+            MCTSNode* next_node = select_child(node, c_puct);
+            if (!next_node) break;
+            board.apply(next_node->move);
+            node = next_node;
+        }
+
+        // --- Step 2: Expansion & Evaluation ---
+        double v = 0.0;
+        if (node->is_terminal) {
+            // Node is already known to be terminal; use its pre-calculated reward
+            v = node->reward;
+        } else {
+            // Expand the leaf node
+            std::vector<Move> legal;
+            board.legal_moves(legal);
+            if (legal.empty()) {
+                // If there are no legal moves, this is a terminal state
+                node->is_terminal = true;
+                double term_result = 0.0;
+                is_terminal_state(board, term_result);
+                node->reward = term_result;
+                v = term_result;
+            } else {
+                // Fetch policy priors from the policy head if available
+                PyObject* policy_obj = nullptr;
+                if (policy_head && policy_head != Py_None) {
+                    PyObject* py_board = make_board();
+                    if (py_board) {
+                        B(py_board) = board;
+                        policy_obj = PyObject_CallFunction(policy_head, "O", py_board);
+                        Py_DECREF(py_board);
+                        if (!policy_obj && PyErr_Occurred()) {
+                            delete root;
+                            return NULL;
+                        }
+                    }
+                }
+
+                // Add child nodes
+                node->children.reserve(legal.size());
+                for (size_t i = 0; i < legal.size(); i++) {
+                    double prob = get_prob(policy_obj, legal[i], i, legal.size());
+                    Board temp = board;
+                    temp.apply(legal[i]);
+                    node->children.push_back(new MCTSNode(legal[i], node, prob, temp.turn));
+                }
+                if (policy_obj) {
+                    Py_DECREF(policy_obj);
+                }
+                node->is_expanded = true;
+
+                // Evaluate the node value directly using the value head
+                PyObject* py_board = make_board();
+                if (py_board) {
+                    B(py_board) = board;
+                    PyObject* val_obj = PyObject_CallFunction(value_head, "O", py_board);
+                    Py_DECREF(py_board);
+                    if (val_obj) {
+                        v = PyFloat_AsDouble(val_obj);
+                        Py_DECREF(val_obj);
+                        if (PyErr_Occurred()) {
+                            delete root;
+                            return NULL;
+                        }
+                    } else {
+                        delete root;
+                        return NULL; // propagate python exception
+                    }
+                } else {
+                    delete root;
+                    PyErr_SetString(PyExc_MemoryError, "Failed to allocate board wrapper");
+                    return NULL;
+                }
+                // Normalize perspective: value head returns active player's POV;
+                // convert it to White's POV for our global backpropagation logic
+                v = (board.turn == 'w') ? v : -v;
+            }
+        }
+
+        // --- Step 4: Backpropagation ---
+        // Propagate the value v (in White's POV) up the tree to the root node
+        MCTSNode* curr = node;
+        while (curr != nullptr) {
+            curr->n += 1;
+            if (curr->turn == 'w') {
+                curr->w += v;
+            } else {
+                curr->w += -v;
+            }
+            curr = curr->parent;
+        }
+    }
+
+    // Identify the best move based on the child with the highest visit count
+    MCTSNode* best_child = nullptr;
+    int max_visits = -1;
+    for (auto* child : root->children) {
+        if (child->n > max_visits) {
+            max_visits = child->n;
+            best_child = child;
+        }
+    }
+
+    // Construct return value: (best_move, [((from, to, promo), visits, q_value), ...])
+    PyObject* best_move_py = Py_None;
+    if (best_child) {
+        best_move_py = move_tuple(best_child->move);
+    } else {
+        Py_INCREF(Py_None);
+    }
+
+    PyObject* visit_counts_list = PyList_New(root->children.size());
+    for (size_t i = 0; i < root->children.size(); i++) {
+        MCTSNode* child = root->children[i];
+        PyObject* m_tup = move_tuple(child->move);
+        double q_val = (child->n > 0) ? (child->w / child->n) : 0.0;
+        PyObject* item = Py_BuildValue("Oid", m_tup, child->n, q_val);
+        Py_DECREF(m_tup);
+        PyList_SET_ITEM(visit_counts_list, i, item);
+    }
+
+    PyObject* result = PyTuple_Pack(2, best_move_py, visit_counts_list);
+    Py_DECREF(best_move_py);
+    Py_DECREF(visit_counts_list);
+
+    delete root;
+    return result;
+}
+
 static PyMethodDef Board_methods[] = {
     {"fen", Board_fen, METH_NOARGS, "Serialise to FEN."},
     {"set_fen", Board_set_fen, METH_VARARGS, "Load from FEN."},
@@ -674,6 +1002,7 @@ static PyMethodDef Board_methods[] = {
     {"san", Board_san, METH_VARARGS, "SAN for a move."},
     {"parse_san", Board_parse_san, METH_VARARGS, "Parse SAN into (from, to, promo)."},
     {"perft", Board_perft, METH_VARARGS, "Count legal-move-tree leaves to depth."},
+    {"mcts_search", Board_mcts_search, METH_VARARGS, "Run MCTS search on this position."},
     {NULL, NULL, 0, NULL},
 };
 

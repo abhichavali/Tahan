@@ -32,6 +32,7 @@ from .engine import (
     BaseEngine,
     RandomEngine,
     MaterialEngine,
+    MCTSEngine,
 )
 from .game import DRAW, BLACK_WINS, WHITE_WINS, Game
 from .move import Move
@@ -56,6 +57,7 @@ __all__ = [
     "BaseEngine",
     "RandomEngine",
     "MaterialEngine",
+    "MCTSEngine",
     "parse_pgn",
     "iter_pgns",
     "iter_games",

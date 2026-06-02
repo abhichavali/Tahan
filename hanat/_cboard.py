@@ -111,6 +111,27 @@ class CppBoard:
         """Count legal-move-tree leaves to ``depth`` entirely in C++ (fast)."""
         return self._b.perft(depth)
 
+    def mcts_search(
+        self,
+        policy_head=None,
+        value_head=None,
+        num_simulations: int = 100,
+        c_puct: float = 1.414,
+    ):
+        wrapped_policy = None
+        if policy_head is not None:
+            def wrapped_policy(raw_b):
+                return policy_head(CppBoard._wrap(raw_b))
+
+        wrapped_value = None
+        if value_head is not None:
+            def wrapped_value(raw_b):
+                return value_head(CppBoard._wrap(raw_b))
+
+        return self._b.mcts_search(
+            wrapped_policy, wrapped_value, num_simulations, c_puct
+        )
+
     # -- display --------------------------------------------------------- #
     def __str__(self) -> str:
         lines = []
