@@ -8,16 +8,16 @@
 #
 #   NVIDIA GPU (build/run on a Linux host with the NVIDIA Container Toolkit):
 #     docker build -t hanat:gpu \
-#       --build-arg BASE_IMAGE=nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04 \
+#       --build-arg BASE_IMAGE=nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04 \
 #       --build-arg CUDA_TAG=cu124 .
 #
-# Both bases are Ubuntu 22.04, so the setup below is identical; only the torch /
+# Both bases are Ubuntu 24.04, so the setup below is identical; only the torch /
 # PyG wheels differ. `docker compose` wires both up for you (see compose file).
 #
 # Python deps are managed with uv (https://docs.astral.sh/uv) into a venv at
 # /opt/venv, which is put first on PATH so `python`/`pip` resolve to it.
 
-ARG BASE_IMAGE=ubuntu:22.04
+ARG BASE_IMAGE=ubuntu:24.04
 FROM ${BASE_IMAGE}
 
 # cpu -> CPU wheels ; cu124 -> CUDA 12.4 wheels (pair with the nvidia/cuda base)
@@ -49,7 +49,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Build and install Ordo
 RUN git clone https://github.com/michiguel/Ordo.git /tmp/ordo \
-    && cd /tmp/ordo/src \
+    && cd /tmp/ordo \
     && make \
     && cp ordo /usr/local/bin/ \
     && rm -rf /tmp/ordo
@@ -58,8 +58,8 @@ RUN git clone https://github.com/michiguel/Ordo.git /tmp/ordo \
 RUN git clone https://github.com/cutechess/cutechess.git /tmp/cutechess \
     && cd /tmp/cutechess \
     && cmake -S . -B build \
-    && cmake --build build --target cutechess-cli \
-    && cp build/projects/cli/cutechess-cli /usr/local/bin/ \
+    && cmake --build build --target cli \
+    && cp "$(find build -type f -name cutechess-cli | head -n1)" /usr/local/bin/ \
     && rm -rf /tmp/cutechess
 
 # uv: a single static binary, copied from the official image.
