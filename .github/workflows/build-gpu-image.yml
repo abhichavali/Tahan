@@ -1,4 +1,4 @@
-name: Build GPU image
+name: Build images
 
 on:
   push:
@@ -12,8 +12,18 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-gpu:
+  build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: cpu
+            base_image: ubuntu:24.04
+            cuda_tag: cpu
+          - variant: gpu
+            base_image: nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
+            cuda_tag: cu124
     steps:
       - uses: actions/checkout@v4
 
@@ -36,10 +46,10 @@ jobs:
           platforms: linux/amd64
           push: true
           build-args: |
-            BASE_IMAGE=nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
-            CUDA_TAG=cu124
+            BASE_IMAGE=${{ matrix.base_image }}
+            CUDA_TAG=${{ matrix.cuda_tag }}
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/hanat:gpu
-            ${{ secrets.DOCKERHUB_USERNAME }}/hanat:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ${{ secrets.DOCKERHUB_USERNAME }}/hanat:${{ matrix.variant }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/hanat:${{ matrix.variant }}-${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
