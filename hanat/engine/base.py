@@ -21,14 +21,27 @@ class EngineUCIServer:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.bind(("127.0.0.1", 0))
         self.port = self.sock.getsockname()[1]
-        self.sock.listen(1)
+        # Allow several queued connections: a match can run games concurrently
+        # and restart the engine between games, each a fresh connection.
+        self.sock.listen(8)
+        self._closed = False
         self.thread = threading.Thread(target=self._listen, daemon=True)
         self.thread.start()
 
     def _listen(self):
+        # Serve connections for the server's whole lifetime, each in its own
+        # thread with its own Game, so concurrent games and engine restarts both
+        # work (the old single-accept loop only ever served one game).
+        while not self._closed:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                break
+            threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
+
+    def _serve(self, conn):
         from ..game import Game
         try:
-            conn, addr = self.sock.accept()
             game = Game(engine=self.engine)
             rfile = conn.makefile("r", encoding="utf-8")
             wfile = conn.makefile("w", encoding="utf-8")
@@ -77,11 +90,21 @@ class EngineUCIServer:
                     wfile.flush()
                 elif cmd == "quit":
                     break
-            conn.close()
         except Exception:
             pass
         finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def close(self):
+        """Stop accepting new connections and release the listening socket."""
+        self._closed = True
+        try:
             self.sock.close()
+        except Exception:
+            pass
 
 
 class BaseEngine:
@@ -199,17 +222,20 @@ except Exception: pass
                 print("ordo stderr:", result_ordo.stderr)
                 raise RuntimeError(f"ordo failed with exit code {result_ordo.returncode}")
 
-            # 7. Parse Ordo ratings output
+            # 7. Parse Ordo ratings output. The rating is the first numeric token
+            # after the engine name; skip any anchor markers ("<", ">", ":") that
+            # Ordo prints between the name and the rating.
             stdout = result_ordo.stdout
             for line in stdout.splitlines():
-                if "HanatEngine" in line:
-                    tokens = line.split()
+                if "HanatEngine" not in line:
+                    continue
+                tokens = line.split()
+                idx = tokens.index("HanatEngine")
+                for tok in tokens[idx + 1:]:
                     try:
-                        idx = tokens.index("HanatEngine")
-                        rating = float(tokens[idx + 1])
-                        return rating
-                    except (ValueError, IndexError):
-                        pass
+                        return float(tok)
+                    except ValueError:
+                        continue
             
             raise RuntimeError(f"Could not find HanatEngine rating in Ordo output:\n{stdout}")
 
