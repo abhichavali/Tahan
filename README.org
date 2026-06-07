@@ -93,6 +93,7 @@ bash setup.sh
 After it finishes, export the Stockfish path so the ELO benchmark can find it:
 
 #+begin_src bash
-export STOCKFISH_PATH=$(command -v stockfish)
+# apt installs stockfish to /usr/games, which is often not on PATH
+export STOCKFISH_PATH=$(command -v stockfish || echo /usr/games/stockfish)
 #+end_src
 

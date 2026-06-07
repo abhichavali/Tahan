@@ -17,6 +17,10 @@ if [ "$(id -u)" -ne 0 ]; then
     SUDO="sudo"
 fi
 
+# torch is installed only if the base image doesn't already provide it. 2.5.0 is
+# pinned so the optional PyG extension wheels below have a matching build.
+TORCH_PIN="2.5.0"
+
 echo "==> [1/6] Installing system dependencies (apt) ..."
 export DEBIAN_FRONTEND=noninteractive
 $SUDO apt-get update
@@ -54,10 +58,18 @@ else
     rm -rf "$tmp_cc"
 fi
 
-echo "==> [4/6] Installing PyG extension wheels for the existing torch ..."
-# Use the base image's torch as-is; just match the optional PyG extension wheels
-# to its version + CUDA tag. These speed up some ops but torch_geometric works
-# without them, so this step is best-effort.
+echo "==> [4/6] Ensuring PyTorch + PyG are installed ..."
+# Some base images ship torch; a bare CUDA + venv image (e.g. vast.ai's) does not.
+# Install a pinned torch only when it's missing. The PyPI Linux wheel is a CUDA
+# build and runs fine on a newer host driver (CUDA is backward compatible), so a
+# 2.5.0/cu124 wheel works on a CUDA 13.x box.
+if ! python -c "import torch" >/dev/null 2>&1; then
+    echo "    torch not found in $(command -v python); installing torch==${TORCH_PIN} ..."
+    pip install "torch==${TORCH_PIN}"
+fi
+# Match the optional PyG extension wheels to the installed torch version + CUDA
+# tag. These speed up some ops but torch_geometric works without them, so this
+# step is best-effort.
 TORCH_VERSION="$(python -c 'import torch; print(torch.__version__.split("+")[0])')"
 CUDA_TAG="$(python -c 'import torch; v=torch.version.cuda; print("cu"+v.replace(".","")) if v else print("cpu")')"
 echo "    detected torch ${TORCH_VERSION} (${CUDA_TAG})"
@@ -72,7 +84,7 @@ pip install -e . --no-build-isolation
 echo "==> [6/6] Verifying installation ..."
 python -c "from hanat.board import BACKEND; assert BACKEND=='cpp', BACKEND; print('hanat chess backend:', BACKEND)"
 python -c "import torch, torch_geometric as g; print('torch', torch.__version__, '| pyg', g.__version__, '| cuda available:', torch.cuda.is_available())"
-for bin in stockfish cutechess-cli ordo; do
+for bin in cutechess-cli ordo; do
     if command -v "$bin" >/dev/null 2>&1; then
         echo "    found $bin -> $(command -v "$bin")"
     else
@@ -80,6 +92,22 @@ for bin in stockfish cutechess-cli ordo; do
     fi
 done
 
+# The apt stockfish package installs to /usr/games, which often isn't on PATH,
+# so resolve it explicitly. find_stockfish() only checks PATH + STOCKFISH_PATH.
+STOCKFISH_BIN="$(command -v stockfish || true)"
+if [ -z "$STOCKFISH_BIN" ] && [ -x /usr/games/stockfish ]; then
+    STOCKFISH_BIN=/usr/games/stockfish
+fi
+if [ -n "$STOCKFISH_BIN" ]; then
+    echo "    found stockfish -> $STOCKFISH_BIN"
+else
+    echo "    WARNING: stockfish not found"
+fi
+
 echo
 echo "Setup complete. Before running find_elo, export the Stockfish path:"
-echo "    export STOCKFISH_PATH=\$(command -v stockfish)"
+if [ -n "$STOCKFISH_BIN" ]; then
+    echo "    export STOCKFISH_PATH=$STOCKFISH_BIN"
+else
+    echo "    export STOCKFISH_PATH=/usr/games/stockfish   # adjust to your install"
+fi
