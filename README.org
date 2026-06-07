@@ -97,3 +97,152 @@ After it finishes, export the Stockfish path so the ELO benchmark can find it:
 export STOCKFISH_PATH=$(command -v stockfish || echo /usr/games/stockfish)
 #+end_src
 
+-----
+
+** Usage Guide: Heads, Search, and ELO
+
+The engine is a thin search shell. You supply two callables — a *policy head*
+and a *value head* — and the native PUCT MCTS does the rest. Nothing about the
+heads is fixed: a hand-written heuristic, a trained neural net, or the random
+baselines below all plug in the same way.
+
+*** The head interface
+
+A *policy head* takes a =Board= and returns a prior over the *legal* moves. Any
+one of three return shapes is accepted:
+
+- a =list[float]= aligned index-for-index with =board.legal_moves()= (should sum to 1),
+- a =dict= mapping UCI strings to probabilities, e.g. ={"e2e4": 0.4, "d2d4": 0.6}=,
+- a =dict= mapping =(from_sq, to_sq, promotion)= tuples to probabilities.
+
+A *value head* takes a =Board= and returns a single =float= in =[-1, 1]=,
+evaluated *from the side-to-move's perspective* (=+1= = side to move is winning,
+=-1= = losing, =0= = drawn). This POV convention lets one value head serve both
+colors.
+
+Inside a head you mostly use: =board.legal_moves()= (a list of =Move=, each with
+=.from_sq=, =.to_sq=, =.promotion=, and =.uci()=), =board.fen()=, and =board.turn=
+(="white"= / ="black"=).
+
+*** Declaring simple (hand-written) heads
+
+These need no training and are handy for smoke-testing the whole pipeline:
+
+#+begin_src python
+from hanat import Game, MCTSEngine
+
+# Uniform policy: every legal move equally likely.
+def uniform_policy_head(board):
+    legal = board.legal_moves()
+    if not legal:
+        return []
+    p = 1.0 / len(legal)
+    return [p] * len(legal)
+
+# Material value: crude centipawn balance squashed into [-1, 1], from the POV
+# of the side to move.
+_VAL = {"p": 1, "n": 3, "b": 3, "r": 5, "q": 9, "k": 0}
+def material_value_head(board):
+    score = 0
+    for sq in range(64):
+        piece = board.piece_at(sq)
+        if not piece:
+            continue
+        v = _VAL[piece.lower()]
+        score += v if piece.isupper() else -v          # white positive
+    if board.turn == "black":
+        score = -score                                  # flip to side-to-move POV
+    return max(-1.0, min(1.0, score / 10.0))
+#+end_src
+
+*** Declaring neural-network heads
+
+Wrap your trained models in the same callable shape. The key detail is the
+policy head: score all moves, then *mask to the legal set and softmax only over
+those* so the output stays aligned with =board.legal_moves()=. Here =encode()=
+and the =policy_net= / =value_net= modules come from your training notebook (see
+=train.py= for the encoding plumbing):
+
+#+begin_src python
+import torch
+
+def make_policy_head(policy_net):
+    policy_net.eval()
+    def policy_head(board):
+        legal = board.legal_moves()
+        if not legal:
+            return []
+        with torch.no_grad():
+            logits = policy_net(encode(board).unsqueeze(0)).squeeze(0)  # [4096]
+        idx = [m.from_sq * 64 + m.to_sq for m in legal]                 # (from, to) index
+        return torch.softmax(logits[idx], dim=0).tolist()              # aligned w/ legal
+    return policy_head
+
+def make_value_head(value_net):
+    value_net.eval()
+    def value_head(board):
+        with torch.no_grad():
+            return float(value_net(encode(board).unsqueeze(0)).item())  # already tanh'd to [-1,1]
+    return value_head
+#+end_src
+
+*** Building the engine and playing
+
+#+begin_src python
+engine = MCTSEngine(
+    policy_head=uniform_policy_head,   # or make_policy_head(policy_net)
+    value_head=material_value_head,    # or make_value_head(value_net)
+    num_simulations=100,               # search budget per move (higher = stronger, slower)
+    c_puct=1.414,                      # exploration constant
+)
+
+game = Game(engine=engine)
+move = game.predict_next_move()        # returns a Move (or None if game over)
+print(move.uci())
+game.push(move)
+#+end_src
+
+*** Measuring ELO
+
+=find_elo()= (on any engine) plays a match against Stockfish via =cutechess-cli=
+and rates the result with =ordo=. It requires =stockfish=, =cutechess-cli=, and
+=ordo= on =PATH= (all provided by =setup.sh=), and a reachable Stockfish binary
+(set =STOCKFISH_PATH= or pass =stockfish_path=).
+
+#+begin_src python
+elo = engine.find_elo(
+    benchmark_level=0,   # Stockfish Skill Level, 0-20 (0 = weakest opponent)
+    num_games=50,        # total games played (rounds = num_games // 2)
+    concurrency=2,       # parallel games
+    tc="40/10",          # time control: 40 moves / 10 seconds
+)
+print(f"ELO: {elo}")
+#+end_src
+
+The returned number is *relative*: Ordo anchors Stockfish at =0=, so a positive
+value means Hanat outscored that Stockfish skill level and a negative value means
+it lost ground. Raise =benchmark_level= as the engine improves to keep the
+opponent competitive.
+
+*** Benchmarking the default random heads
+
+The =demo.py= random baselines are the natural floor to compare against. Import
+them (or paste the definitions) and run the same =find_elo=:
+
+#+begin_src python
+from hanat import MCTSEngine
+from demo import random_policy_head, random_value_head
+
+random_engine = MCTSEngine(
+    policy_head=random_policy_head,   # softmax over random per-move scores
+    value_head=random_value_head,     # uniform random in [-1, 1]
+    num_simulations=100,
+)
+
+baseline_elo = random_engine.find_elo(benchmark_level=0, num_games=50)
+print(f"Random-head baseline ELO: {baseline_elo}")
+#+end_src
+
+Run this once to establish your floor, then compare your trained heads' ELO
+against it to confirm the networks are actually learning something.
+

@@ -169,7 +169,7 @@ except Exception: pass
             # 5. Run cutechess-cli
             cmd_cutechess = [
                 "cutechess-cli",
-                "-engine", "name=HanatEngine", "cmd=python3", client_path, str(server.port),
+                "-engine", "name=HanatEngine", "cmd=python3", f"arg={client_path}", f"arg={server.port}",
                 "-engine", "name=Stockfish", f"cmd={stockfish_path}", f"option.Skill Level={benchmark_level}",
                 "-each", "proto=uci", f"tc={tc}",
                 "-rounds", str(rounds),
