@@ -173,6 +173,7 @@ except Exception: pass
                 "-engine", "name=Stockfish", f"cmd={stockfish_path}", f"option.Skill Level={benchmark_level}",
                 "-each", "proto=uci", f"tc={tc}",
                 "-rounds", str(rounds),
+                "-games", "2",  # 2 games per round so colors alternate -> rounds*2 == num_games
                 "-concurrency", str(concurrency),
                 "-pgnout", pgn_path
             ]
@@ -188,7 +189,9 @@ except Exception: pass
                 "ordo",
                 "-p", pgn_path,
                 "-a", "0",
-                "-A", "Stockfish"
+                "-A", "Stockfish",
+                "-G",  # force a rating even when the result graph is poorly connected
+                       # (e.g. a weak engine that wins or loses every game)
             ]
             result_ordo = subprocess.run(cmd_ordo, capture_output=True, text=True)
             if result_ordo.returncode != 0:
