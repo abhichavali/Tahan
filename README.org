@@ -82,17 +82,17 @@ python3 train.py --data data/twic1646.pgn --max-games 3000 --epochs 5
 #+end_src
 
 
-*** Using Docker
+*** Setup on a GPU box (vast.ai)
 
-A complete environment containing Python, C++ toolchain, Stockfish, PyTorch, and PyTorch Geometric can be run via Docker Compose:
+For training on a rented GPU instance, launch the recommended vast.ai PyTorch image (it ships CUDA, Python, PyTorch, and JupyterLab), then run the setup script from the repo root. It installs the C++ toolchain and native engine, Stockfish, cutechess-cli, Ordo, and =torch_geometric= on top of the base image:
 
 #+begin_src bash
-# Build and run the CPU image
-docker compose build hanat
-docker compose run --rm hanat
+bash setup.sh
+#+end_src
 
-# Build and run the GPU image (requires NVIDIA Container Toolkit)
-docker compose build hanat-gpu
-docker compose run --rm hanat-gpu
+After it finishes, export the Stockfish path so the ELO benchmark can find it:
+
+#+begin_src bash
+export STOCKFISH_PATH=$(command -v stockfish)
 #+end_src
 
